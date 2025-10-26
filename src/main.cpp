@@ -49,7 +49,7 @@ const char pagina_template[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Submarino Microcontrolado</title>
+  <title>Nautilus VI</title>
   <style>
     body {
       margin: 0;
@@ -152,16 +152,18 @@ const char pagina_template[] PROGMEM = R"rawliteral(
   </style>
 
   <script>
-    const ESP32_IP = 'http://{{ESP32_IP}}';
+    const ESP32_IP = window.location.hostname;
     function sendCommand(cmd) {
-      fetch(`${ESP32_IP}/${cmd}`)
-        .then(response => console.log("Comando enviado:", cmd))
-        .catch(error => console.error("error:", error));
+      fetch(`http://${ESP32_IP}/${cmd}`)
+        .then(response => response.text())
+        .then(text => console.log("Respuesta:", text))
+        .catch(error => console.error("Error:", error));
+
     }
 
     // Función para actualizar sensores cada 1s
     function actualizarSensores() {
-      fetch(`${ESP32_IP}/sensores`)
+      fetch(`http://${ESP32_IP}/sensores`)
         .then(res => res.json())
         .then(data => {
           document.getElementById("tempBMP").innerText = data.tempBMP + " °C";
@@ -202,7 +204,7 @@ const char pagina_template[] PROGMEM = R"rawliteral(
   <div id="info" class="panel">
     <h2>Info</h2>
     <p><b>Proyecto:</b> Nautilus VI</p>
-    <p><b>Equipo:</b> Gonzalo, Benicio, Nicolás y Brenda</p>
+    <p><b>Equipo:</b> Gonzalo Bardauil, Benicio Mario Ortiz, Nicolás Monetti y Brenda Tamara Gamboa Arellano Barreira</p>
     <p><b>Profesor:</b> Franco Zapata</p>
     <p><b>Colegio:</b> Instituto Técnico San Judas Tadeo</p>
 
@@ -233,28 +235,35 @@ void handleRootRequest(AsyncWebServerRequest *request) {
 }
 
 // Función para manejar la petición de toggle (/toggle)
-void subir(AsyncWebServerRequest *request) {
+  void subir(AsyncWebServerRequest *request) {
+    Serial.println("Subiendo");
     digitalWrite(pinesBomba[0], HIGH);
     digitalWrite(pinesBomba[1], LOW);
-    request->redirect("/"); //lo mando a la ruta (/)
-}
-
-void bajar(AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "OK");
+  }
+  
+  void bajar(AsyncWebServerRequest *request) {
+    Serial.println("Bajando");
     digitalWrite(pinesBomba[1], HIGH);
     digitalWrite(pinesBomba[0], LOW);
-    request->redirect("/"); //lo mando a la ruta (/)
-}
-
-void parar(AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "OK");
+  }
+  
+  void parar(AsyncWebServerRequest *request) {
+    Serial.println("Alto");
     digitalWrite(pinesBomba[1], LOW);
     digitalWrite(pinesBomba[0], LOW);
-    request->redirect("/"); //lo mando a la ruta (/)
+    request->send(200, "text/plain", "OK");
 }
 
 
 void setup() {
   Serial.begin(115200);
   Serial.println("Bienvendo abordo, capitan");
+  for (int i = 0; i < 2; i++) {
+  pinMode(pinesBomba[i], OUTPUT);
+  digitalWrite(pinesBomba[i], LOW);
+}
 
   sensorDS18B20.begin();
 
@@ -315,18 +324,29 @@ void setup() {
   server.on("/bajar", HTTP_GET, bajar);
   server.on("/parar", HTTP_GET, parar);
   server.on("/sensores", HTTP_GET, [](AsyncWebServerRequest *request){
+    // Lectura rápida para asegurar valores recientes
+    mpu.update();
+    float tempBMP = bmp.readTemperature();
+    float presBMP = bmp.readPressure()/100.0;
+    float altBMP = bmp.readAltitude(SEALEVELPRESSURE_HPA);
+    sensorDS18B20.requestTemperatures();
+    float tAgua = sensorDS18B20.getTempCByIndex(0);
+
     String json = "{";
-    json += "\"tempBMP\":" + String(bmp.readTemperature()) + ",";
-    json += "\"presionBMP\":" + String(bmp.readPressure()/100.0) + ",";
-    json += "\"altitudBMP\":" + String(bmp.readAltitude(SEALEVELPRESSURE_HPA)) + ",";
-    json += "\"tempAgua\":" + String(tempAgua) + ",";
-    json += "\"incX\":" + String(inclinacionX) + ",";
-    json += "\"incY\":" + String(inclinacionY) + ",";
-    json += "\"incZ\":" + String(inclinacionZ) + ",";
-    json += "\"accTotal\":" + String(aceleracionTotal);
+    json += "\"tempBMP\":" + String(tempBMP) + ",";
+    json += "\"presionBMP\":" + String(presBMP) + ",";
+    json += "\"altitudBMP\":" + String(altBMP) + ",";
+    json += "\"tempAgua\":" + String(tAgua) + ",";
+    json += "\"incX\":" + String(mpu.getAccX()) + ",";
+    json += "\"incY\":" + String(mpu.getAccY()) + ",";
+    json += "\"incZ\":" + String(mpu.getAccZ()) + ",";
+    json += "\"accTotal\":" + String(sqrt(
+        pow(mpu.getAccX()*gravedad,2) + pow(mpu.getAccY()*gravedad,2) + pow(mpu.getAccZ()*gravedad,2)
+    ));
     json += "}";
     request->send(200, "application/json", json);
 });
+
 
 
   // Iniciar servidor
@@ -336,6 +356,7 @@ void setup() {
 void loop() {
   // El loop sigue libre para las tareas de hardware
   if (millis() - t_Previo > 1000) { // cada 1 segundo
+    mpu.update();
     inclinacionX = mpu.getAccX();
     inclinacionY = mpu.getAccY();
     inclinacionZ = mpu.getAccZ();
