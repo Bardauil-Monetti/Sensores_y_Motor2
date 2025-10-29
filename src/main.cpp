@@ -8,11 +8,15 @@
 #include <DallasTemperature.h> // DS18B20
 #include <MPU6050_light.h>
 #include <math.h>
+#include <ESP32Servo.h>
 
-const char* red = "Telecentro-ece8";
-const char* contra = "DPYD4HHFQ37C";
-
-
+const char* red = "CESJT";
+const char* contra = "itisjtsmg";
+const int Fcarre[2] = {25, 26};
+const int ESC[2] = {34, 10};
+int ESCval[2] = {0, 0};
+Servo esc[2];
+int escValue[2];
 
 #define SEALEVELPRESSURE_HPA (1024) // Presión estándar
 
@@ -38,6 +42,7 @@ DallasTemperature sensorDS18B20(&oneWireObjeto);
 
 // Configuro sv asincrono
 AsyncWebServer server(80);
+
 
 const int pinesBomba[2] = {26, 27};
 int t_Previo;
@@ -230,39 +235,74 @@ const char pagina_template[] PROGMEM = R"rawliteral(
 // Función para manejar la petición a la página principal (/)
 void handleRootRequest(AsyncWebServerRequest *request) {
     String pagina = pagina_template; //hago una variable para no modificar a la original
-    
+    ESCval[0] = map(2000, 0, 4095, 1000, 2000);
+    if(digitalRead(Fcarre[0]) || digitalRead(Fcarre[1])){
+      request->redirect("/parar");
+    }
     request->send(200, "text/html", pagina);
 }
 
 // Función para manejar la petición de toggle (/toggle)
-  void subir(AsyncWebServerRequest *request) {
+void subir(AsyncWebServerRequest *request) {
     Serial.println("Subiendo");
     digitalWrite(pinesBomba[0], HIGH);
     digitalWrite(pinesBomba[1], LOW);
     request->send(200, "text/plain", "OK");
   }
   
-  void bajar(AsyncWebServerRequest *request) {
+void bajar(AsyncWebServerRequest *request) {
     Serial.println("Bajando");
     digitalWrite(pinesBomba[1], HIGH);
     digitalWrite(pinesBomba[0], LOW);
     request->send(200, "text/plain", "OK");
   }
   
-  void parar(AsyncWebServerRequest *request) {
+void parar(AsyncWebServerRequest *request) {
     Serial.println("Alto");
     digitalWrite(pinesBomba[1], LOW);
     digitalWrite(pinesBomba[0], LOW);
+    for(int i=0; i<2; i++){
+      escValue[i] = map(0, 0, 4095, 1000, 2000);
+      esc[i].writeMicroseconds(escValue[i]);
+    }
     request->send(200, "text/plain", "OK");
 }
 
+void avanzar(AsyncWebServerRequest *request) {
+    Serial.println("Adelante");
+    for(int i=0; i<2; i++){
+      escValue[i] = map(2000, 0, 4095, 1000, 2000);
+      esc[i].writeMicroseconds(escValue[i]);
+    }
+    request->send(200, "text/plain", "OK");
+}
+
+void derecha(AsyncWebServerRequest *request) {
+    Serial.println("derecha");
+    escValue[0] = map(0, 0, 4095, 1000, 2000);
+    escValue[1] = map(2000, 0, 4095, 1000, 2000);
+    esc[0].writeMicroseconds(escValue[0]);
+    esc[1].writeMicroseconds(escValue[1]);
+    request->send(200, "text/plain", "OK");
+}
+
+void izquierda(AsyncWebServerRequest *request) {
+    Serial.println("izquierda");
+    escValue[1] = map(0, 0, 4095, 1000, 2000);
+    escValue[0] = map(2000, 0, 4095, 1000, 2000);
+    esc[1].writeMicroseconds(escValue[1]);
+    esc[0].writeMicroseconds(escValue[0]);
+    request->send(200, "text/plain", "OK");
+}
 
 void setup() {
   Serial.begin(115200);
   Serial.println("Bienvendo abordo, capitan");
   for (int i = 0; i < 2; i++) {
   pinMode(pinesBomba[i], OUTPUT);
+  pinMode(Fcarre[i], INPUT);
   digitalWrite(pinesBomba[i], LOW);
+  esc[i].attach(ESC[i], 1000, 2000);
 }
 
   sensorDS18B20.begin();
@@ -323,6 +363,9 @@ void setup() {
   server.on("/subir", HTTP_GET, subir);
   server.on("/bajar", HTTP_GET, bajar);
   server.on("/parar", HTTP_GET, parar);
+  server.on("/adelante", HTTP_GET, avanzar);
+  server.on("/derecha", HTTP_GET, derecha);
+  server.on("/izquierda", HTTP_GET, izquierda);
   server.on("/sensores", HTTP_GET, [](AsyncWebServerRequest *request){
     // Lectura rápida para asegurar valores recientes
     mpu.update();
@@ -346,8 +389,6 @@ void setup() {
     json += "}";
     request->send(200, "application/json", json);
 });
-
-
 
   // Iniciar servidor
   server.begin();
